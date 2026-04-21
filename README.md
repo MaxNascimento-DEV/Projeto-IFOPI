@@ -68,7 +68,7 @@ Desenvolvemos um sistema que oferece:
 
 ---
 
-##👥 Equipe
+## 👥 Equipe
 
 - Carlos Henrique de Lima Borba 
 - Heberth Igor Camelo de Alcântara 
@@ -80,7 +80,7 @@ Desenvolvemos um sistema que oferece:
 - Vinícius Tavares de Oliveira
 - Yan Lucas Queiroz Cavalcante do Couto
 
-##📄 Licença
+## 📄 Licença
 
 Este projeto foi desenvolvido para fins acadêmicos.
 
