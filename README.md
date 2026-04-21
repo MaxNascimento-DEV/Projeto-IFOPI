@@ -79,6 +79,8 @@ Desenvolvemos um sistema que oferece:
 - Rafael Lucas Silva de Assis 
 - Vinícius Tavares de Oliveira
 - Yan Lucas Queiroz Cavalcante do Couto
+  
+---
 
 ## 📄 Licença
 
