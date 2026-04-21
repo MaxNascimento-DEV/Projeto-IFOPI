@@ -41,7 +41,10 @@ if (strpos($apiPath, 'auth.php') !== false) {
     $routeFile = 'routes/admin.php';
 } elseif (strpos($apiPath, 'professor.php') !== false) {
     $routeFile = 'routes/professor.php';
+} elseif (strpos($apiPath, 'aluno.php') !== false) {
+    $routeFile = 'routes/aluno.php';
 }
+
 
 if ($routeFile && file_exists($routeFile)) {
     require_once $routeFile;

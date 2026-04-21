@@ -1,88 +1,117 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { toast } from 'react-hot-toast';
-import { FaUser, FaBook, FaChalkboardTeacher, FaSearch, FaSave, FaToggleOn, FaToggleOff } from 'react-icons/fa';
+import { FaUser, FaPlus, FaMinus, FaSave, FaSpinner, FaSearch } from 'react-icons/fa';
 
 const Professor = () => {
   const { user, logout } = useAuth();
-  const [disciplinas, setDisciplinas] = useState([]);
-  const [selectedDisc, setSelectedDisc] = useState('');
   const [search, setSearch] = useState('');
   const [alunos, setAlunos] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [dateFilter, setDateFilter] = useState('TODOS');
-  const [statusFilter, setStatusFilter] = useState('TODOS');
+  const [savingIds, setSavingIds] = useState(new Set());
+  const [stats, setStats] = useState({ total: 0, avgNota: 0, totalFaltas: 0 });
 
+
+  // Load ALL students on mount (no discipline)
   useEffect(() => {
-    if (user) {
-      loadDisciplinas();
+    if (user?.tipo === 'professor') {
+      loadAlunos();
     }
   }, [user]);
 
-  const loadDisciplinas = async () => {
-    try {
-      const response = await fetch(`/backend/routes/professor.php?action=disciplinas`, { credentials: 'include' });
-      const data = await response.json();
-      setDisciplinas(data.disciplinas || []);
-      if (data.disciplinas?.length > 0) {
-        setSelectedDisc(data.disciplinas[0]);
-        loadAlunos(data.disciplinas[0]);
-      }
-    } catch (e) {
-      toast.error('Erro carregar disciplinas');
-    }
-  };
 
-  const loadAlunos = async (disciplina) => {
+  const loadAlunos = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        disciplina,
-        date: dateFilter,
-        status: statusFilter,
-        search
-      });
-      const response = await fetch(`/backend/routes/professor.php?action=students&${params}`, { credentials: 'include' });
+      const params = new URLSearchParams({ search });
+      const response = await fetch(`/backend/routes/professor.php?${params}`, { credentials: 'include' });
       const data = await response.json();
-      setAlunos(data.alunos || []);
-      toast.success(`Carregados ${data.alunos?.length || 0} alunos`);
+      if (data.success) {
+        setAlunos(data.alunos || []);
+        // Calculate stats
+        const total = data.alunos?.length || 0;
+        const avgNota = data.alunos?.reduce((sum, a) => sum + (parseFloat(a.nota) || 0), 0) / Math.max(1, total);
+        const totalFaltas = data.alunos?.reduce((sum, a) => sum + (parseInt(a.faltas) || 0), 0);
+        setStats({ total, avgNota: avgNota.toFixed(1), totalFaltas });
+        toast.success(`📊 ${total} alunos carregados | Média: ${avgNota.toFixed(1)}`);
+      }
     } catch (e) {
-      toast.error('Erro carregar alunos');
+      toast.error('Erro ao carregar alunos');
     }
     setLoading(false);
-  };
+  }, [search]);
 
-  const saveNota = async (aluno) => {
+
+  const updateAlunoLocal = useCallback((alunoId, field, value) => {
+    setAlunos(prev => prev.map(a => 
+      a.id === alunoId 
+        ? { ...a, [field]: field === 'nota' ? parseFloat(value) || '' : parseInt(value) || 0 }
+        : a
+    ));
+  }, []);
+
+  const saveNotaFaltas = useCallback(async (aluno, e) => {
+    if (e) e.stopPropagation();
+    const alunoId = aluno.id;
+    const nota = parseFloat(aluno.nota) || 0;
+    const faltas = parseInt(aluno.faltas) || 0;
+
+    if (nota > 10 || nota < 0 || faltas < 0) {
+      toast.error('Nota 0-10, faltas >= 0');
+      return;
+    }
+
+    setSavingIds(prev => new Set([...prev, alunoId]));
     try {
-      const response = await fetch('/backend/routes/professor.php?action=update', {
+      const response = await fetch('/backend/routes/professor.php', {
         credentials: 'include',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          aluno_id: aluno.id,
-          disciplina: selectedDisc,
-          nota: parseFloat(aluno.nota) || 0,
-          faltas: parseInt(aluno.faltas) || 0,
-        }),
+        body: JSON.stringify({ aluno_id: alunoId, nota, faltas }),
       });
       const data = await response.json();
       if (data.success) {
-        toast.success(data.mensagem);
-        setAlunos(alunos.map(a => a.id === aluno.id ? {...a, nota: parseFloat(aluno.nota), faltas: parseInt(aluno.faltas)} : a));
+        toast.success(`✅ ${aluno.nome_completo.slice(0,15)}... atualizado`, { duration: 2000 });
+        window.dispatchEvent(new CustomEvent('alunoGradesUpdated', { detail: { alunoId } }));
+        const avgNota = alunos.reduce((sum, a) => sum + (parseFloat(a.nota) || 0), 0) / Math.max(1, alunos.length);
+        const totalFaltas = alunos.reduce((sum, a) => sum + (parseInt(a.faltas) || 0), 0);
+        setStats(prev => ({ ...prev, avgNota: avgNota.toFixed(1), totalFaltas }));
       }
     } catch (e) {
-      toast.error('Erro salvar');
+      toast.error('Erro ao salvar');
     }
-  };
+    setSavingIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(alunoId);
+      return newSet;
+    });
+  }, [updateAlunoLocal, alunos]);
 
-  const filteredAlunos = alunos.filter(a => 
-    a.nome.toLowerCase().includes(search.toLowerCase()) || 
-    a.numero.includes(search)
-  );
+
+  const changeFaltas = useCallback((alunoId, delta) => {
+    setAlunos(prev => prev.map(a => 
+      a.id === alunoId 
+        ? { ...a, faltas: Math.max(0, (parseInt(a.faltas) || 0) + delta) }
+        : a
+    ));
+  }, []);
+
+  // Search debounced
+  useEffect(() => {
+    const timeout = setTimeout(() => loadAlunos(), 500);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
+
+  const filteredAlunos = useMemo(() => 
+    alunos.filter(a => 
+      (!search || 
+        a.nome_completo.toLowerCase().includes(search.toLowerCase()) || 
+        a.numero.includes(search))
+    ), [alunos, search]);
 
   return (
     <div className='min-h-screen bg-[#d9d9d9] font-poppins text-[#7c7c7c]'>
-      {/* Header matching Admin/Painel */}
       <header className='w-full'>
         <div className='h-[20px] w-full bg-ifopiBlue'></div>
         <div className='h-[72px] flex justify-center items-center bg-[#d9d9d9]'>
@@ -92,104 +121,103 @@ const Professor = () => {
       </header>
 
       <div className='w-[86%] max-w-[1180px] mx-auto mt-[34px] mb-[40px]'>
-        {/* Title */}
         <div className='flex justify-between items-center mb-[30px]'>
-          <h1 className='text-[24px] text-ifopiBlueLight font-bold'>Lançamento de Notas - {user?.nome}</h1>
-          <button onClick={logout} className='bg-ifopiBlue text-white px-[20px] py-[10px] rounded-[8px] hover:bg-[#154a7a] transition'>
+          <h1 className='text-[24px] text-ifopiBlueLight font-bold'>
+            📚 Gestão de Turma - {user?.nome}
+          </h1>
+
+          <button onClick={logout} className='bg-ifopiBlue text-white px-[20px] py-[10px] rounded-[8px] hover:bg-[#154a7a] transition-all'>
             Sair
           </button>
         </div>
 
-        {/* Toolbar - same as Painel */}
-        <div className='h-[32px] bg-ifopiBlue shadow-[5px_7px_8px_rgba(0,0,0,0.18)] grid grid-cols-[120px_170px_1fr] items-center mb-[20px] rounded-t'>
-          <div className='relative'>
-            <button className='w-full h-full bg-transparent text-white text-[11px] px-[10px] flex items-center justify-between font-poppins'>
-              {dateFilter}
-              <svg className='w-[12px]' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M19 9l-7 7-7-7' />
-              </svg>
-            </button>
+        {/* Stats Bar */}
+        {stats.total > 0 && (
+          <div className='bg-white shadow-[5px_7px_8px_rgba(0,0,0,0.18)] p-[16px] rounded mb-[20px] grid grid-cols-3 gap-4 text-[14px]'>
+            <div><strong>{stats.total}</strong> Alunos</div>
+            <div><strong>{stats.avgNota}</strong> Média Geral</div>
+            <div><strong>{stats.totalFaltas}</strong> Faltas Totais</div>
           </div>
-          
-          <div className='relative border-l border-white/12'>
-            <button className='w-full h-full bg-transparent text-white text-[11px] px-[10px] flex items-center justify-between font-poppins'>
-              TODOS ALUNOS
-              <svg className='w-[12px]' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M19 9l-7 7-7-7' />
-              </svg>
-            </button>
-          </div>
-          
-          <div className='grid grid-cols-[1fr_auto] items-center h-full'>
+        )}
+
+        {/* Filters */}
+        {/* Search only */}
+        <div className='grid grid-cols-1 md:grid-cols-1 gap-[16px] mb-[20px]'>
+          <div className='bg-[#d9d9d9] p-[12px] rounded flex items-center gap-2'>
+            <FaSearch className='text-[#9a9a9a]'/>
             <input 
-              placeholder='Filtrar...' 
+              placeholder='Buscar aluno...' 
               value={search} 
               onChange={(e) => setSearch(e.target.value)}
-              className='w-full h-full bg-transparent text-white pl-[12px] text-[12px] placeholder-white/90'
-              onKeyPress={(e) => e.key === 'Enter' && loadAlunos(selectedDisc)}
+              className='flex-1 h-[36px] bg-white border border-[#ababab] px-[12px] rounded text-[13px] focus:outline-none focus:border-ifopiBlue'
             />
-            <button className='w-[44px] h-full bg-transparent text-white text-[14px]'>
-              🔍
-            </button>
           </div>
         </div>
 
-        {/* Discipline filter */}
-        <div className='bg-[#d9d9d9] p-[12px] rounded mb-[20px]'>
-          <label className='block text-[12px] text-[#9a9a9a] mb-[8px]'>Disciplina</label>
-          <select 
-            value={selectedDisc} 
-            onChange={(e) => {
-              setSelectedDisc(e.target.value);
-              loadAlunos(e.target.value);
-            }}
-            className='w-full h-[32px] bg-white border border-[#ababab] px-[12px] text-[13px] rounded'
-          >
-            <option value="">Selecione disciplina</option>
-            {disciplinas.map(d => <option key={d}>{d}</option>)}
-          </select>
-        </div>
 
-        {/* Table Card */}
+        {/* Dynamic Table */}
         <div className='bg-[#d9d9d9] shadow-[5px_7px_8px_rgba(0,0,0,0.18)] rounded overflow-hidden'>
-          <div className='grid grid-cols-[1.6fr_1.2fr_70px] bg-white p-[12px] text-[11px] text-[#9a9a9a] border-b border-[#ababab] font-bold'>
+          <div className='grid grid-cols-[2fr_1.2fr_80px_60px_24px] bg-white p-[12px] text-[11px] text-[#9a9a9a] border-b border-[#ababab] font-bold'>
             <span>ALUNO</span>
             <span>MATRÍCULA</span>
             <span>NOTA</span>
+            <span>FALTAS</span>
+            <span></span>
           </div>
-          <div className='min-h-[400px]'>
-            {filteredAlunos.map((aluno) => (
-              <div key={aluno.id} className='grid grid-cols-[1.6fr_1.2fr_70px] items-center h-[34px] p-[12px] border-b border-[#ababab] hover:bg-white/20 text-[12px]'>
-                <div className='flex items-center gap-[14px]'>
-                  <FaUser className='text-[#707070] text-[15px]' />
-                  <span>{aluno.nome} {aluno.sobrenome}</span>
-                </div>
-                <span className='text-[#818181]'>{aluno.numero}</span>
-                <div className='flex gap-[8px]'>
+          <div className='min-h-[400px] max-h-[70vh] overflow-auto'>
+            {loading ? (
+              <div className='p-[60px] text-center'><FaSpinner className='animate-spin mx-auto text-2xl text-ifopiBlue mb-4'/></div>
+            ) : filteredAlunos.length === 0 ? (
+              <div className='p-[60px] text-center text-[#9a9a9a] text-[14px]'>
+                {search ? 'Nenhum aluno encontrado' : 'Carregando alunos...'}
+              </div>
+            ) : (
+
+              filteredAlunos.map((aluno) => (
+                <div key={aluno.id} className='grid grid-cols-[2fr_1.2fr_80px_60px_24px] items-center h-[44px] p-[12px] border-b border-[#f0f0f0] hover:bg-white/50 group'>
+                  <div className='flex items-center gap-[12px]'>
+                    <FaUser className='text-[#707070] text-[16px] flex-shrink-0'/>
+                    <span className='font-medium text-[13px]'>{aluno.nome_completo}</span>
+                  </div>
+                  <span className='text-[#818181] font-mono text-[12px]'>{aluno.numero}</span>
                   <input 
                     type="number" 
                     min="0" max="10" step="0.1"
-                    value={aluno.nota || ''}
-                    onChange={(e) => {
-                      const newAlunos = alunos.map(a => a.id === aluno.id ? {...a, nota: e.target.value} : a);
-                      setAlunos(newAlunos);
-                    }}
-                    className='w-[50px] p-[4px] border border-[#ababab] rounded text-[12px] bg-white focus:outline-none focus:border-ifopiBlue'
+                    value={aluno.nota ?? ''}
+                    onChange={(e) => updateAlunoLocal(aluno.id, 'nota', e.target.value)}
+                    onBlur={() => saveNotaFaltas(aluno)}
+                    className='w-full max-w-[60px] p-[6px] border border-[#ababab] rounded text-[13px] text-center bg-white/80 hover:border-ifopiBlue focus:outline-none focus:border-ifopiBlue focus:ring-2 focus:ring-ifopiBlue/20 transition-all'
+                    placeholder='0.0'
                   />
+                  <div className='flex items-center gap-[4px]'>
+                    <span className='text-[13px] font-mono min-w-[20px] text-right'>{aluno.faltas || 0}</span>
+                    <div className='flex gap-[2px]'>
+                      <button 
+                        onClick={() => changeFaltas(aluno.id, -1)}
+                        className='w-[20px] h-[20px] bg-red-500/80 hover:bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center transition-all shadow-sm'
+                        title='Remover falta'
+                      >
+                        <FaMinus />
+                      </button>
+                      <button 
+                        onClick={() => changeFaltas(aluno.id, 1)}
+                        className='w-[20px] h-[20px] bg-green-500/80 hover:bg-green-500 text-white text-[10px] rounded-full flex items-center justify-center transition-all shadow-sm'
+                        title='Adicionar falta'
+                      >
+                        <FaPlus />
+                      </button>
+                    </div>
+                  </div>
                   <button 
-                    onClick={() => saveNota(aluno)}
-                    className='w-[22px] h-[12px] border-none rounded-full relative cursor-pointer transition-all bg-green-500'
-                    title='Salvar nota'
+                    onClick={(e) => saveNotaFaltas(aluno, e)}
+                    disabled={savingIds.has(aluno.id)}
+                    className='opacity-0 group-hover:opacity-100 p-0 w-[20px] h-[20px] bg-blue-500 hover:bg-blue-600 text-white text-[10px] rounded-full flex items-center justify-center transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed'
+                    title='Salvar tudo'
                   >
-                    <FaSave className='absolute text-white text-[8px] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2' />
+                    {savingIds.has(aluno.id) ? <FaSpinner className='animate-spin'/> : <FaSave />}
                   </button>
                 </div>
-              </div>
-            ))}
-            {filteredAlunos.length === 0 && (
-              <div className='p-[40px] text-center text-[#9a9a9a] text-[14px]'>
-                {loading ? 'Carregando...' : 'Nenhum aluno encontrado'}
-              </div>
+              ))
             )}
           </div>
         </div>
@@ -198,7 +226,9 @@ const Professor = () => {
       <style jsx>{`
         @media (max-width: 768px) {
           .w-\\[86\\%] { width: 95%; margin-top: 22px; }
-          .grid-cols-\\[1\\.6fr_1\\.2fr_70px\\] { grid-template-columns: 1fr 1fr auto; }
+          .grid-cols-\\[2fr_1\\.2fr_80px_60px_24px\\] { 
+            grid-template-columns: 2fr 1fr 60px 60px auto !important; 
+          }
         }
       `}</style>
     </div>

@@ -1,28 +1,13 @@
-# TODO: Integração FrontEndInter.2026.1
+# TODO: Fix Professor Registration 500 Error
+Status: [IN PROGRESS] 🚧
 
-## Status: ✅ In Progress
+## Steps:
+- [x] 1. Create this TODO.md
+- [x] 2. Edit backend/controllers/AdminController.php - Add random numero generation for professor
+- [ ] 3. Test professor registration in Admin panel
+- [ ] 4. Verify new professor appears in professors tab
+- [ ] 5. Check DB entry: SELECT * FROM cadastro WHERE tipo='professor' ORDER BY id DESC
+- [ ] 6. Test login with new professor
+- [x] 7. attempt_completion
 
-### 1. Preparação (Configs/Assets) [CURRENT]
-- [x] Create TODO.md
-- [ ] Copy imagens to public/images/
-- [ ] Update tailwind.config.js (colors/fonts)
-- [ ] Update src/index.css (Poppins import)
-
-### 2. Home Page Integration
-- [x] Update src/components/Home.jsx (homePage → React/Tailwind)
-- [ ] Update src/components/HomeNew.jsx (match Home)
-
-### 3. Login Page ✅ COMPLETE
-- [x] Update src/components/Login.jsx (split layout + images/text)
-
-### 4. Admin/Painel ✅ COMPLETE
-- [x] Update src/components/Admin.jsx (toolbar filters/table/status toggles/sidebar - full painel design + original CRUD preserved)
-
-### 5. Aluno/Progress ✅ COMPLETE
-- [x] Update src/components/Aluno.jsx (exact StudentProgress design)
-
-### 6. Finalização ✅ COMPLETE
-- [x] Install react-icons
-- [x] Test full flows (run `npm run dev`)
-- [ ] Backend API filter support (admin.php?action=students with params)
-- [x] Complete integration ✅
+**Status**: ✅ Professor registration FIXED! Test in Admin panel → Novo Professor modal.

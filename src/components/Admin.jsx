@@ -7,6 +7,31 @@ const API_BASE = '/backend/routes/admin.php';
 
 const Admin = () => {
   const { user, logout } = useAuth();
+
+  const handleDelete = async (id, tipo) => {
+    if (!confirm(`Confirmar deleção do ${tipo}? Esta ação é irreversível!`)) return;
+    
+    try {
+      const res = await fetch(`${API_BASE}?id=${id}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.mensagem);
+        // Refresh current tab
+        if (activeTab === 'alunos') {
+          fetchStudents();
+        } else {
+          fetchProfessors();
+        }
+      } else {
+        toast.error(data.mensagem || 'Erro ao deletar');
+      }
+    } catch (err) {
+      toast.error('Erro de conexão');
+    }
+  };
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedDateFilter, setSelectedDateFilter] = useState('HOJE');
@@ -19,14 +44,94 @@ const Admin = () => {
   const [showTeacherModal, setShowTeacherModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    id: '', nome: '', sobrenome: '', cpf: '', email: '', numero: ''
+  });
+
+  const loadUserForEdit = (user) => {
+    setEditingUser(user);
+    setEditFormData({
+      id: user.id,
+      nome: user.nome,
+      sobrenome: user.sobrenome || '',
+      email: user.email || '',
+      cpf: user.cpf || '',
+      numero: user.numero || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditInputChange = (e) => {
+    setEditFormData({ ...editFormData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmitEdit = async (e) => {
+    e.preventDefault();
+    if (!editFormData.nome || !editFormData.email || !/^[^@]+@[^@]+\.[^@]+$/.test(editFormData.email)) {
+      toast.error('Nome e email válidos obrigatórios');
+      return;
+    }
+    try {
+      console.log('Enviando update:', editFormData); // debug
+      const res = await fetch(API_BASE, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ action: 'update-user', ...editFormData })
+      });
+      console.log('Response status:', res.status, res.statusText); // debug
+      let data = {};
+      let rawText = "";
+      try {
+        rawText = await res.text();
+        console.log("Raw response:", rawText);
+        if (rawText && rawText.trim() !== "") {
+          data = JSON.parse(rawText);
+        }
+      } catch (err) {
+        console.error("Parse error:", err);
+        console.log("Raw response (erro):", rawText);
+        toast.error("Erro ao processar resposta do servidor");
+        return;
+      }
+      console.log('Response data:', data); // debug
+      if (data.success) {
+        toast.success(data.mensagem);
+        setShowEditModal(false);
+        setEditingUser(null);
+        setEditFormData({ id: '', nome: '', sobrenome: '', cpf: '', email: '', numero: '' });
+        fetchStudents();
+        fetchProfessors();
+      } else {
+        toast.error(data.mensagem || 'Erro ao atualizar');
+      }
+    } catch (err) {
+      console.error('Edit error:', err);
+      toast.error('Erro de conexão: ' + err.message);
+    }
+  };
+
+
   const [formData, setFormData] = useState({
     nome: '', sobrenome: '', cpf: '', email: '', senha: '', disciplinas: []
   });
+
   const [submitting, setSubmitting] = useState(false);
   const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
   const [studentsDropdownOpen, setStudentsDropdownOpen] = useState(false);
+  const [professors, setProfessors] = useState([]);
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
+  const [activeTab, setActiveTab] = useState('alunos');
+  const [teacherFormData, setTeacherFormData] = useState({
+    nome: '', sobrenome: '', email: '', senha: ''
+  });
+
 
   const dateOptions = ['HOJE', 'ONTEM', 'ÚLTIMOS 7 DIAS', 'ÚLTIMOS 30 DIAS'];
+
   const studentsOptions = ['TODOS OS ALUNOS', 'ATIVOS', 'INATIVOS', 'MATRICULADOS', 'NÃO MATRICULADOS'];
   const unidades = ['', 'Unidade 1', 'Unidade 2', 'Unidade 3'];
   const modalidades = ['', 'Presencial', 'Online', 'Híbrido'];
@@ -57,9 +162,32 @@ const Admin = () => {
     }
   }, [selectedDateFilter, selectedStudentsFilter, searchQuery, unidade, modalidade, onlyEnrolled]);
 
-  useEffect(() => {
-    fetchStudents();
+  const fetchProfessors = useCallback(async () => {
+    setLoadingTeachers(true);
+    try {
+      const res = await fetch(`${API_BASE}?action=users&q=`, { credentials: 'include' });
+      const data = await res.json();
+      if (data.success) {
+        const profs = data.users.filter(u => u.tipo === 'professor') || [];
+        setProfessors(profs);
+      } else {
+        toast.error('Erro ao carregar professores');
+      }
+    } catch (err) {
+      toast.error('Falha ao carregar professores');
+    } finally {
+      setLoadingTeachers(false);
+    }
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'alunos') {
+      fetchStudents();
+    } else {
+      fetchProfessors();
+    }
+  }, [activeTab]);
+
 
   const applyFilters = () => {
     fetchStudents();
@@ -103,10 +231,20 @@ const Admin = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  const handleTeacherInputChange = (e) => {
+    setTeacherFormData({ ...teacherFormData, [e.target.name]: e.target.value });
+  };
+
+
   const handleSubmitStudent = async (e) => {
+
     e.preventDefault();
-    if (!formData.nome || !formData.senha) {
-      toast.error('Nome e senha obrigatórios');
+    if (!formData.nome || !formData.senha || !formData.email || !/^[^@]+@[^@]+\.[^@]+$/.test(formData.email)) {
+      toast.error('Nome, email válido e senha obrigatórios');
+      return;
+    }
+    if (formData.senha.length < 6) {
+      toast.error('Senha deve ter pelo menos 6 caracteres');
       return;
     }
     setSubmitting(true);
@@ -133,11 +271,43 @@ const Admin = () => {
     }
   };
 
+  const handleSubmitTeacher = async (e) => {
+    e.preventDefault();
+    if (!teacherFormData.nome || !teacherFormData.senha || !teacherFormData.email || !teacherFormData.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      toast.error('Nome, email válido e senha obrigatórios');
+      return;
+    }
+    if (teacherFormData.senha.length < 6) {
+      toast.error('Senha deve ter pelo menos 6 caracteres');
+      return;
+    }
+    try {
+      const res = await fetch(API_BASE, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create-teacher', ...teacherFormData })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.mensagem);
+        setShowTeacherModal(false);
+        setTeacherFormData({ nome: '', sobrenome: '', email: '', senha: '' });
+        fetchProfessors();
+      } else {
+        toast.error(data.mensagem || 'Erro ao criar professor');
+      }
+    } catch (err) {
+      toast.error('Falha ao criar professor');
+    }
+  };
+
+
   // ... (all other original functions: handleSubmitTeacher, handleDelete, handleEdit, loadUserForEdit, handleSubmitEdit - keep as is)
 
-  const disciplines = ['Matemática', 'Português', 'História', 'Geografia', 'Biologia', 'Física', 'Química', 'Inglês'];
 
   return (
+
     <div className='min-h-screen bg-[#d9d9d9] font-poppins text-[#7c7c7c]'>
       {/* Header */}
       <header className='w-full'>
@@ -152,8 +322,25 @@ const Admin = () => {
       <main className='dashboard w-[86%] max-w-[1180px] mx-auto mt-[34px] mb-[40px] grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-[12px]'>
         {/* Main Panel */}
         <section className='main-panel'>
+          {/* Tabs */}
+          <div className='tabs h-[38px] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)] flex border-b border-[#e0e0e0]'>
+            <button 
+              className={`tab-btn flex-1 text-[13px] font-medium py-[10px] border-b-2 transition-all ${activeTab === 'alunos' ? 'border-ifopiBlue text-ifopiBlue' : 'border-transparent text-[#666]'}`}
+              onClick={() => setActiveTab('alunos')}
+            >
+              Alunos ({students.length})
+            </button>
+            <button 
+              className={`tab-btn flex-1 text-[13px] font-medium py-[10px] border-b-2 transition-all ${activeTab === 'professores' ? 'border-ifopiBlue text-ifopiBlue' : 'border-transparent text-[#666]'}`}
+              onClick={() => setActiveTab('professores')}
+            >
+              Professores ({professors.length})
+            </button>
+          </div>
+
           {/* Toolbar */}
           <div className='toolbar h-[32px] bg-[#005ea8] grid grid-cols-[120px_170px_1fr] items-center shadow-[5px_7px_8px_rgba(0,0,0,0.18)]'>
+
             {/* Date Dropdown */}
             <div className='dropdown relative h-full'>
               <button 
@@ -230,34 +417,104 @@ const Admin = () => {
 
           {/* Table */}
           <div className='table-card min-h-[470px] bg-[#d9d9d9] shadow-[5px_7px_8px_rgba(0,0,0,0.18)]'>
-            <div className='table-head min-h-[28px] px-[12px] text-[11px] text-[#9a9a9a] border-b border-[#ababab] grid grid-cols-[1.6fr_1.2fr_70px] items-center'>
-              <span>ALUNO</span>
-              <span>MATRÍCULA</span>
-              <span></span>
-            </div>
-            {loading ? (
-              <div className='p-[20px_12px] text-[12px] text-[#9a9a9a] text-center'>Carregando...</div>
-            ) : students.length === 0 ? (
-              <div className='empty-message p-[20px_12px] text-[12px] text-[#9a9a9a]'>Nenhum aluno encontrado.</div>
-            ) : (
-              <div id='tableBody'>
-                {students.map((student) => (
-                  <div key={student.id} className='table-row min-h-[34px] px-[12px] border-b border-[#ababab] text-[12px] grid grid-cols-[1.6fr_1.2fr_70px] items-center hover:bg-white/20'>
-                    <div className='student-cell flex items-center gap-[14px]'>
-                      <FaUser className='text-[15px] text-[#707070]' />
-                      <span>{student.nome} {student.sobrenome}</span>
-                    </div>
-                    <div className='registration-cell text-[#818181]'>{student.numero || student.registration}</div>
-                    <div className='status-cell flex justify-center'>
-                      <button
-                        className={`status-toggle w-[22px] h-[12px] border-none rounded-full relative cursor-pointer transition-all ${student.active ? 'bg-[#63c83d]' : 'bg-[#d63d3d]'}`}
-                        onClick={() => toggleStatus(student.id)}
-                      />
-                    </div>
+            {activeTab === 'alunos' ? (
+              <>
+                <div className='table-head min-h-[28px] px-[12px] text-[11px] text-[#9a9a9a] border-b border-[#ababab] grid grid-cols-[1.6fr_1.2fr_70px_60px_30px] items-center'>
+                  <span>Aluno</span>
+                  <span>Matrícula</span>
+                  <span>Status</span>
+                  <span>Ações</span>
+                  <span></span>
+                </div>
+
+                {loading ? (
+                  <div className='p-[20px_12px] text-[12px] text-[#9a9a9a] text-center'>Carregando alunos...</div>
+                ) : students.length === 0 ? (
+                  <div className='empty-message p-[20px_12px] text-[12px] text-[#9a9a9a]'>Nenhum aluno encontrado.</div>
+                ) : (
+                  <div id='tableBody'>
+                    {students.map((student) => (
+                      <div key={student.id} className='table-row min-h-[34px] px-[12px] border-b border-[#f0f0f0] text-[12px] grid grid-cols-[1.6fr_1.2fr_70px_60px_30px] items-center hover:bg-white/50'>
+                        <div className='flex items-center gap-[12px]'>
+                          <FaUser className='text-[15px] text-[#707070]' />
+                          <span className='font-medium'>{student.nome} {student.sobrenome}</span>
+                        </div>
+                        <span className='font-mono text-[#818181]'>{student.numero}</span>
+                        <div className='flex items-center justify-end gap-2'>
+                          <button
+                            className={`w-[22px] h-[12px] border-none rounded-full relative cursor-pointer transition-all shadow-sm ${student.active ? 'bg-green-500' : 'bg-red-500'}`}
+                            onClick={() => toggleStatus(student.id)}
+                            title={student.active ? 'Inativo' : 'Ativo'}
+                          />
+                          <button
+                            onClick={() => loadUserForEdit(student)}
+                            className='text-blue-600 hover:text-blue-400 p-1 text-xs transition-colors'
+                            title='Editar'
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => handleDelete(student.id, 'aluno')}
+                            className='text-red-500 hover:text-red-600 p-1 text-xs transition-colors ml-1'
+                            title='Deletar'
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                        <div></div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className='table-head min-h-[28px] px-[12px] text-[11px] text-[#9a9a9a] border-b border-[#ababab] grid grid-cols-[1.6fr_1.5fr_1.2fr_60px_30px] items-center'>
+                  <span>Professor</span>
+                  <span>Email</span>
+                  <span>Disciplinas</span>
+                  <span>Ações</span>
+                  <span></span>
+                </div>
+                {loadingTeachers ? (
+                  <div className='p-[20px_12px] text-[12px] text-[#9a9a9a] text-center'>Carregando professores...</div>
+                ) : professors.length === 0 ? (
+                  <div className='empty-message p-[20px_12px] text-[12px] text-[#9a9a9a]'>Nenhum professor encontrado.</div>
+                ) : (
+                  <div id='tableBodyProf'>
+                    {professors.map((prof) => (
+                      <div key={prof.id} className='table-row min-h-[34px] px-[12px] border-b border-[#f0f0f0] text-[12px] grid grid-cols-[1.6fr_1.5fr_1.2fr_60px_30px] items-center hover:bg-white/50'>
+                        <div className='flex items-center gap-[12px]'>
+                          <FaUser className='text-[15px] text-[#707070]' />
+                          <span className='font-medium'>{prof.nome} {prof.sobrenome}</span>
+                        </div>
+                        <span className='text-[#666] text-[11px]'>{prof.email}</span>
+                        <span className='text-[#818181] text-[11px]'>{prof.disciplinas?.join(', ') || 'N/A'}</span>
+                        <div className='flex justify-end gap-1'>
+                          <button
+                            onClick={() => loadUserForEdit(prof)}
+                            className='text-blue-600 hover:text-blue-400 p-1 text-xs transition-colors'
+                            title='Editar'
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => handleDelete(prof.id, 'professor')}
+                            className='text-red-500 hover:text-red-600 p-1 text-xs transition-colors'
+                            title='Deletar'
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                        <div></div>
+                      </div>
+
+                    ))}
+                  </div>
+                )}
+              </>
             )}
+
           </div>
         </section>
 
@@ -321,24 +578,256 @@ const Admin = () => {
         </aside>
 
         {/* Original Sidebar Buttons (positioned above table if needed) */}
-        <div className='lg:hidden fixed bottom-4 right-4 z-30 space-y-2'>
+        {/* Desktop Sidebar Buttons */}
+        <div className='hidden lg:flex flex-col gap-3 absolute right-6 top-1/2 -translate-y-1/2 bg-white/90 backdrop-blur-sm p-6 rounded-2xl shadow-2xl border'>
           <button
             onClick={() => setShowStudentModal(true)}
-            className="w-[140px] flex items-center px-4 py-2 bg-green-600 text-white rounded-xl text-sm shadow-lg hover:bg-green-700"
+            className="w-[140px] h-[48px] bg-gradient-to-r from-green-500 to-green-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-green-600 hover:to-green-700 transform hover:scale-[1.02] transition-all duration-200 flex items-center justify-center text-sm"
           >
-            Novo Aluno
+            ➕ Novo Aluno
           </button>
           <button
             onClick={() => setShowTeacherModal(true)}
-            className="w-[140px] flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl text-sm shadow-lg hover:bg-blue-700"
+            className="w-[140px] h-[48px] bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-blue-600 hover:to-blue-700 transform hover:scale-[1.02] transition-all duration-200 flex items-center justify-center text-sm"
           >
-            Novo Professor
+            👨‍🏫 Novo Professor
           </button>
         </div>
 
-        {/* All Original Modals - preserved */}
-        {/* Student Modal, Teacher Modal, Edit Modal - same as original code */}
+        {/* Mobile Buttons */}
+        <div className='lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40 space-y-2'>
+          <button
+            onClick={() => setShowStudentModal(true)}
+            className="w-32 h-14 bg-gradient-to-r from-green-500 to-green-600 text-white font-semibold rounded-2xl shadow-2xl hover:shadow-3xl transform hover:scale-[1.05] transition-all duration-200 flex items-center justify-center text-sm"
+          >
+            ➕ Aluno
+          </button>
+          <button
+            onClick={() => setShowTeacherModal(true)}
+            className="w-32 h-14 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-2xl shadow-2xl hover:shadow-3xl transform hover:scale-[1.05] transition-all duration-200 flex items-center justify-center text-sm"
+          >
+            👨‍🏫 Prof
+          </button>
+        </div>
+
+
+        {/* Student Registration Modal */}
+        {showStudentModal && (
+          <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
+            <div className='bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl'>
+              <div className='flex justify-between items-center mb-6'>
+                <h2 className='text-2xl font-bold text-gray-800'>Novo Aluno</h2>
+                <button onClick={() => setShowStudentModal(false)} className='text-gray-500 hover:text-gray-700 text-xl'>
+                  ×
+                </button>
+              </div>
+              <form onSubmit={handleSubmitStudent} className='space-y-4'>
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Nome *</label>
+                  <input 
+                    name='nome' 
+                    value={formData.nome} 
+                    onChange={handleInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Sobrenome</label>
+                  <input 
+                    name='sobrenome' 
+                    value={formData.sobrenome} 
+                    onChange={handleInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                  />
+                </div>
+                <div className='grid grid-cols-2 gap-4'>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 mb-1'>CPF</label>
+                    <input 
+                      name='cpf' 
+                      value={formData.cpf} 
+                      onChange={handleInputChange}
+                      className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                    />
+                  </div>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 mb-1'>Email *</label>
+                    <input 
+                      name='email' 
+                      type='email'
+                      value={formData.email} 
+                      onChange={handleInputChange}
+                      className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                      required 
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Senha * (mín 6 chars)</label>
+                  <input 
+                    name='senha' 
+                    type='password'
+                    value={formData.senha} 
+                    onChange={handleInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                    required 
+                  />
+                </div>
+                <button 
+                  type='submit' 
+                  disabled={submitting}
+                  className='w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all text-lg'
+                >
+                  {submitting ? 'Criando...' : 'Criar Aluno'}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Teacher Registration Modal */}
+        {showTeacherModal && (
+          <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
+            <div className='bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl'>
+              <div className='flex justify-between items-center mb-6'>
+                <h2 className='text-2xl font-bold text-gray-800'>Novo Professor</h2>
+                <button onClick={() => setShowTeacherModal(false)} className='text-gray-500 hover:text-gray-700 text-xl'>
+                  ×
+                </button>
+              </div>
+              <form onSubmit={handleSubmitTeacher} className='space-y-4'>
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Nome *</label>
+                  <input 
+                    name='nome' 
+                    value={teacherFormData.nome} 
+                    onChange={handleTeacherInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Sobrenome</label>
+                  <input 
+                    name='sobrenome' 
+                    value={teacherFormData.sobrenome} 
+                    onChange={handleTeacherInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                  />
+                </div>
+                <div className='grid grid-cols-2 gap-4'>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 mb-1'>Email *</label>
+                    <input 
+                      name='email' 
+                      type='email'
+                      value={teacherFormData.email} 
+                      onChange={handleTeacherInputChange}
+                      className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                      required 
+                    />
+                  </div>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 mb-1'>Senha * (mín 6 chars)</label>
+                    <input 
+                      name='senha' 
+                      type='password'
+                      value={teacherFormData.senha} 
+                      onChange={handleTeacherInputChange}
+                      className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                      required 
+                    />
+                  </div>
+                </div>
+                <button 
+                  type='submit' 
+                  className='w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50 transition-all text-lg'
+                >
+                  Criar Professor
+                </button>
+
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Modal - preserved if exists */}
+{showEditModal && editingUser && (
+          <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
+            <div className='bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl'>
+              <div className='flex justify-between items-center mb-6'>
+                <h2 className='text-2xl font-bold text-gray-800'>Editar {editingUser.tipo === 'aluno' ? 'Aluno' : 'Professor'}</h2>
+                <button onClick={() => {setShowEditModal(false); setEditingUser(null);}} className='text-gray-500 hover:text-gray-700 text-xl'>
+                  ×
+                </button>
+              </div>
+              <form onSubmit={handleSubmitEdit} className='space-y-4'>
+                <input type="hidden" name="id" value={editFormData.id} />
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Nome *</label>
+                  <input 
+                    name='nome' 
+                    value={editFormData.nome} 
+                    onChange={handleEditInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Sobrenome</label>
+                  <input 
+                    name='sobrenome' 
+                    value={editFormData.sobrenome} 
+                    onChange={handleEditInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                  />
+                </div>
+                <div className='grid grid-cols-2 gap-4'>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 mb-1'>CPF</label>
+                    <input 
+                      name='cpf' 
+                      value={editFormData.cpf} 
+                      onChange={handleEditInputChange}
+                      className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                    />
+                  </div>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 mb-1'>Email *</label>
+                    <input 
+                      name='email' 
+                      type='email'
+                      value={editFormData.email} 
+                      onChange={handleEditInputChange}
+                      className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500' 
+                      required 
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 mb-1'>Matrícula/Nº</label>
+                  <input 
+                    name='numero' 
+                    value={editFormData.numero} 
+                    onChange={handleEditInputChange}
+                    className='w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-100' 
+                    disabled
+                  />
+                </div>
+                <button 
+                  type='submit' 
+                  className='w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition-all text-lg'
+                >
+                  Salvar Alterações
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
       </main>
+
 
       {/* Responsive */}
       <style jsx>{`  

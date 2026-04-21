@@ -13,16 +13,17 @@ class Auth {
 
     public function validarDados() {
         $this->nome = trim(htmlspecialchars($this->nome));
-        $this->sobrenome = trim(htmlspecialchars($this->sobrenome));
+        $this->sobrenome = trim(htmlspecialchars($this->sobrenome ?? ''));
         $this->email = filter_var($this->email, FILTER_SANITIZE_EMAIL);
         $this->numero = preg_replace('/[^0-9a-zA-Z]/', '', $this->numero);
         
-        if (strlen($this->nome) < 2 || strlen($this->sobrenome) < 2) return false;
+        if (strlen($this->nome) < 2) return false;
         if (!filter_var($this->email, FILTER_VALIDATE_EMAIL)) return false;
         if (strlen($this->senha) < 6) return false;
         if (!in_array($this->tipo, ['aluno', 'professor', 'admin'])) return false;
         return true;
     }
+
     
     public function criar() {
         if (!$this->validarDados()) return false;
@@ -53,10 +54,10 @@ class Auth {
     public function usernameExists($username) {
         $sql = "SELECT id FROM {$this->table} WHERE email = ? OR numero = ? LIMIT 1";
         $stmt = DB::query($sql, 'ss', [$username, $username]);
-        return $stmt && $stmt->affected_rows > 0; // Wait, for SELECT rowCount approx
         $result = $stmt->get_result();
         return $result->num_rows > 0;
     }
 }
 ?>
+
 

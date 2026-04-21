@@ -4,9 +4,9 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET');
 header('Access-Control-Allow-Headers: Content-Type');
 
-require_once 'config/security.php';
-require_once '../config/db.php';
-require_once '../controllers/AlunoController.php';
+// require_once 'config/security.php'; // Disabled for public latest nota
+require_once 'config/database.php';
+require_once 'controllers/AlunoController.php';
 
 $controller = new AlunoController();
 
